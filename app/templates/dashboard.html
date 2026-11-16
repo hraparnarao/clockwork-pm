@@ -1,0 +1,259 @@
+{% extends "base.html" %}
+{% block title %}Dashboard – ClockWork PM{% endblock %}
+
+{% block head %}
+<style>
+  .dash-grid { display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1rem; }
+  @media (max-width:860px) { .dash-grid { grid-template-columns:1fr; } }
+
+  .missing-list { display:flex; flex-direction:column; gap:.35rem; }
+  .missing-item {
+    display:flex; align-items:center; gap:.5rem;
+    padding:.4rem .7rem; background:var(--status-amber-bg);
+    border-left:3px solid var(--status-amber-text);
+    border-radius:4px; font-size:13px; color:var(--status-amber-text); font-weight:500;
+  }
+  .not-sub-item {
+    display:flex; align-items:center; gap:.5rem;
+    padding:.4rem .7rem; background:var(--status-stale-bg);
+    border-left:3px solid var(--gray-30);
+    border-radius:4px; font-size:13px; color:var(--gray-70);
+  }
+
+  /* SVG bar chart */
+  .bar-chart-svg { display:block; width:100%; overflow:visible; }
+  .bar-label { font-family:var(--font); font-size:11px; fill:var(--muted); }
+  .bar-value { font-family:var(--font); font-size:11px; fill:var(--gray-70); font-weight:600; }
+  .bar-rect  { fill:var(--primary); opacity:.85; border-radius:3px; }
+  .bar-rect.cat-internal { fill:#7A5AF8; }
+  .bar-rect.cat-personal { fill:#F79009; }
+  .bar-rect.cat-leave    { fill:#B42318; }
+
+  .kpi-cards { grid-template-columns: repeat(4,1fr); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Dashboard</h1>
+  <button class="btn btn-ghost btn-sm" onclick="loadDashboard()">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+    Refresh
+  </button>
+</div>
+
+<!-- KPI Cards -->
+<div class="kpi-cards" id="kpi-row">
+  <div class="kpi-card kpi-purple">
+    <div class="kpi-number" id="kpi-week">—</div>
+    <div class="kpi-label">Hours This Week</div>
+  </div>
+  <div class="kpi-card kpi-purple">
+    <div class="kpi-number" id="kpi-month">—</div>
+    <div class="kpi-label">Hours This Month</div>
+  </div>
+  <div class="kpi-card kpi-green">
+    <div class="kpi-number" id="kpi-billable">—</div>
+    <div class="kpi-label">Billable %</div>
+  </div>
+  <div class="kpi-card kpi-amber" id="kpi-missing-card">
+    <div class="kpi-number" id="kpi-missing">—</div>
+    <div class="kpi-label">Days Missing Entries</div>
+  </div>
+</div>
+
+<!-- Charts row -->
+<div class="dash-grid">
+  <div class="dash-card">
+    <div class="dash-card-title">Hours by Category (last 30 days)</div>
+    <svg id="chart-cat" class="bar-chart-svg" height="180"></svg>
+  </div>
+  <div class="dash-card">
+    <div class="dash-card-title">Hours by Day (this week)</div>
+    <svg id="chart-day" class="bar-chart-svg" height="180"></svg>
+  </div>
+</div>
+
+<div class="dash-grid">
+  <div class="dash-card">
+    <div class="dash-card-title">Hours by Project (last 30 days)</div>
+    <svg id="chart-proj" class="bar-chart-svg" height="200"></svg>
+  </div>
+  <div class="dash-card" id="missing-card">
+    <div class="dash-card-title">Days Without Entries (this week)</div>
+    <div class="missing-list" id="missing-list"></div>
+  </div>
+</div>
+
+<!-- Manager / Admin section (shown conditionally) -->
+<div id="mgr-section" style="display:none;">
+  <div class="dash-grid">
+    <div class="dash-card">
+      <div class="dash-card-title">Hours by Person (this week)</div>
+      <svg id="chart-person" class="bar-chart-svg" height="200"></svg>
+    </div>
+    <div class="dash-card">
+      <div class="dash-card-title">Not Submitted This Week</div>
+      <div class="missing-list" id="not-submitted-list"></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function loadDashboard() {
+  fetch('/api/dashboard/data')
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.error) { toast(d.error, true); return; }
+
+    // KPIs
+    document.getElementById('kpi-week').textContent    = d.kpi.hours_this_week + 'h';
+    document.getElementById('kpi-month').textContent   = d.kpi.hours_this_month + 'h';
+    document.getElementById('kpi-billable').textContent = d.kpi.billable_pct + '%';
+    document.getElementById('kpi-missing').textContent = d.kpi.missing_days;
+
+    var missingCard = document.getElementById('kpi-missing-card');
+    missingCard.className = 'kpi-card ' + (d.kpi.missing_days > 0 ? 'kpi-red' : 'kpi-green');
+
+    // Missing days list
+    var missingList = document.getElementById('missing-list');
+    missingList.innerHTML = '';
+    if (d.missing_day_names.length === 0) {
+      missingList.innerHTML = '<div style="color:var(--status-green-text);font-size:13px;font-weight:600;padding:.5rem 0;">✓ All days logged this week</div>';
+    } else {
+      d.missing_day_names.forEach(function(day) {
+        var el = document.createElement('div');
+        el.className = 'missing-item';
+        el.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>' + day;
+        missingList.appendChild(el);
+      });
+    }
+
+    // Category chart
+    var cats = ['Billable', 'Internal', 'Personal', 'Leave'];
+    var catValues = cats.map(function(c) { return d.cat_totals[c] || 0; });
+    renderBarChart('chart-cat', cats, catValues, ['#8B1F6B','#7A5AF8','#F79009','#B42318']);
+
+    // Day chart
+    var dayLabels = d.day_chart.map(function(x) { return x.day; });
+    var dayValues = d.day_chart.map(function(x) { return x.hours; });
+    renderBarChart('chart-day', dayLabels, dayValues, null, 8);
+
+    // Project chart
+    var projLabels = d.hours_by_project.map(function(x) { return x.name; });
+    var projValues = d.hours_by_project.map(function(x) { return x.hours; });
+    renderBarChart('chart-proj', projLabels, projValues, null);
+
+    // Manager / Admin sections
+    if (d.role === 'Manager' || d.role === 'Admin') {
+      document.getElementById('mgr-section').style.display = '';
+      var personLabels = d.hours_by_person.map(function(x) { return x.name.split(' ')[0]; });
+      var personValues = d.hours_by_person.map(function(x) { return x.hours; });
+      renderBarChart('chart-person', personLabels, personValues, null);
+
+      var nsList = document.getElementById('not-submitted-list');
+      nsList.innerHTML = '';
+      if (d.not_submitted.length === 0) {
+        nsList.innerHTML = '<div style="color:var(--status-green-text);font-size:13px;font-weight:600;padding:.5rem 0;">✓ Everyone has submitted</div>';
+      } else {
+        d.not_submitted.forEach(function(name) {
+          var el = document.createElement('div');
+          el.className = 'not-sub-item';
+          el.textContent = name;
+          nsList.appendChild(el);
+        });
+      }
+    }
+  })
+  .catch(function(e) { toast('Failed to load dashboard', true); });
+}
+
+// ── Simple SVG bar chart ──────────────────────────────────────────────────────
+function renderBarChart(svgId, labels, values, colors, targetLine) {
+  var svg = document.getElementById(svgId);
+  if (!svg) return;
+  svg.innerHTML = '';
+  if (!labels.length) return;
+
+  var W = svg.parentElement.offsetWidth || 400;
+  var H = parseInt(svg.getAttribute('height')) || 180;
+  var paddingLeft = 10, paddingRight = 10, paddingTop = 20, paddingBottom = 36;
+  var chartW = W - paddingLeft - paddingRight;
+  var chartH = H - paddingTop - paddingBottom;
+
+  var maxVal = Math.max.apply(null, values.concat(targetLine ? [targetLine] : []));
+  if (maxVal === 0) maxVal = 1;
+
+  var n = labels.length;
+  var barW = Math.max(8, Math.floor(chartW / n * 0.6));
+  var gap  = chartW / n;
+
+  var ns = 'http://www.w3.org/2000/svg';
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  svg.setAttribute('width', W);
+
+  function fy(v) { return paddingTop + chartH - (v / maxVal * chartH); }
+
+  // Target line
+  if (targetLine) {
+    var ty = fy(targetLine);
+    var line = document.createElementNS(ns, 'line');
+    line.setAttribute('x1', paddingLeft); line.setAttribute('x2', paddingLeft + chartW);
+    line.setAttribute('y1', ty); line.setAttribute('y2', ty);
+    line.setAttribute('stroke', '#12B76A'); line.setAttribute('stroke-width', '1.5');
+    line.setAttribute('stroke-dasharray', '4 3');
+    svg.appendChild(line);
+    var lbl = document.createElementNS(ns, 'text');
+    lbl.setAttribute('x', paddingLeft + chartW - 2); lbl.setAttribute('y', ty - 4);
+    lbl.setAttribute('text-anchor', 'end'); lbl.setAttribute('class', 'bar-label');
+    lbl.setAttribute('fill', '#12B76A'); lbl.textContent = targetLine + 'h target';
+    svg.appendChild(lbl);
+  }
+
+  labels.forEach(function(label, i) {
+    var val = values[i];
+    var bx  = paddingLeft + gap * i + (gap - barW) / 2;
+    var bh  = val / maxVal * chartH;
+    var by  = paddingTop + chartH - bh;
+    var col = colors ? colors[i % colors.length] : 'var(--primary)';
+
+    if (targetLine && val > targetLine) col = '#B42318';
+    else if (targetLine && val === targetLine) col = '#12B76A';
+    else if (targetLine && val > 0 && val < targetLine) col = '#F79009';
+
+    var rect = document.createElementNS(ns, 'rect');
+    rect.setAttribute('x', bx); rect.setAttribute('y', by);
+    rect.setAttribute('width', barW); rect.setAttribute('height', Math.max(bh, 2));
+    rect.setAttribute('fill', col); rect.setAttribute('rx', 3);
+    svg.appendChild(rect);
+
+    // Value label
+    if (val > 0) {
+      var vt = document.createElementNS(ns, 'text');
+      vt.setAttribute('x', bx + barW / 2); vt.setAttribute('y', by - 4);
+      vt.setAttribute('text-anchor', 'middle'); vt.setAttribute('class', 'bar-value');
+      vt.textContent = val % 1 === 0 ? val : val.toFixed(1);
+      svg.appendChild(vt);
+    }
+
+    // X label
+    var xt = document.createElementNS(ns, 'text');
+    xt.setAttribute('x', bx + barW / 2);
+    xt.setAttribute('y', paddingTop + chartH + 16);
+    xt.setAttribute('text-anchor', 'middle');
+    xt.setAttribute('class', 'bar-label');
+    // Truncate long labels
+    xt.textContent = label.length > 9 ? label.slice(0,8) + '…' : label;
+    svg.appendChild(xt);
+  });
+}
+
+window.addEventListener('load', loadDashboard);
+window.addEventListener('resize', function() {
+  clearTimeout(window._rTimer);
+  window._rTimer = setTimeout(loadDashboard, 200);
+});
+</script>
+{% endblock %}

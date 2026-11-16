@@ -1,0 +1,549 @@
+{% extends "base.html" %}
+{% block title %}My Timesheet – ClockWork PM{% endblock %}
+
+{% block head %}
+<style>
+  .week-nav { display:flex; align-items:center; gap:.6rem; }
+  .week-label { font-size:14px; font-weight:600; color:var(--text); min-width:200px; text-align:center; }
+
+  .day-section { margin-bottom:1.25rem; }
+  .day-header {
+    display:flex; align-items:center; justify-content:space-between;
+    background:#F5EAF2; border:1px solid var(--border);
+    border-radius:var(--radius) var(--radius) 0 0;
+    padding:.55rem 1rem;
+  }
+  .day-name { font-size:13px; font-weight:700; color:var(--primary); }
+  .day-total { font-size:13px; font-weight:700; }
+
+  .day-table-wrap {
+    border:1px solid var(--border); border-top:none;
+    border-radius:0 0 var(--radius) var(--radius);
+    background:var(--surface); overflow-x:auto;
+  }
+  .day-table-wrap table { min-width:600px; }
+  .day-table-wrap tr:last-child td { border-bottom:none; }
+
+  .add-row-btn {
+    display:flex; align-items:center; gap:.35rem;
+    font-size:12px; font-weight:600; color:var(--primary);
+    background:none; border:none; cursor:pointer; padding:.5rem 1rem;
+    border-top:1px dashed var(--border); width:100%;
+    transition:background .12s;
+  }
+  .add-row-btn:hover { background:var(--gray-15); }
+
+  .inline-form { display:none; background:var(--gray-15); padding:.75rem 1rem; border-top:1px solid var(--border); }
+  .inline-form.visible { display:block; }
+  .inline-form-grid { display:flex; flex-wrap:wrap; gap:.6rem; align-items:flex-end; }
+  .inline-form-grid .form-group { flex:1; min-width:130px; }
+  .inline-form-grid .fg-hours { flex:0 0 90px; }
+  .inline-form-grid .fg-activity { flex:2; min-width:180px; }
+
+  .action-btn {
+    background:none; border:none; cursor:pointer; padding:.2rem .35rem;
+    border-radius:4px; color:var(--muted); transition:color .12s, background .12s;
+  }
+  .action-btn:hover { background:var(--gray-15); color:var(--text); }
+  .action-btn.del:hover { color:var(--color-red); background:var(--status-red-bg); }
+
+  .status-bar {
+    display:flex; align-items:center; justify-content:space-between;
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:var(--radius); padding:.75rem 1.25rem;
+    margin-bottom:1.25rem; box-shadow:var(--shadow-sm);
+  }
+  .status-bar-left { display:flex; align-items:center; gap:.75rem; }
+
+  .submitted-notice {
+    background:var(--status-green-bg); color:var(--status-green-text);
+    border:1px solid #ABEFC6; border-radius:var(--radius);
+    padding:.65rem 1rem; font-size:13px; font-weight:600;
+    margin-bottom:1.25rem;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">My Timesheet</h1>
+  <div style="display:flex;gap:.5rem;align-items:center;">
+    <div class="week-nav">
+      <a href="/timesheet?week={{ prev_week }}" class="btn btn-ghost btn-sm">‹ Prev</a>
+      <span class="week-label">{{ week_label }}</span>
+      <a href="/timesheet?week={{ next_week }}" class="btn btn-ghost btn-sm {% if is_future %}btn-disabled{% endif %}"
+         {% if is_future %}onclick="return false" style="opacity:.4;cursor:not-allowed"{% endif %}>Next ›</a>
+    </div>
+  </div>
+</div>
+
+<!-- Status bar -->
+<div class="status-bar">
+  <div class="status-bar-left">
+    <span style="font-size:13px;color:var(--muted);">Week status:</span>
+    {% if week_status == 'Submitted' %}
+      <span class="badge badge-submitted">✓ Submitted</span>
+    {% elif week_status == 'partial' %}
+      <span class="badge badge-personal">◑ Partially submitted</span>
+    {% elif week_status == 'Draft' %}
+      <span class="badge badge-draft">Draft</span>
+    {% else %}
+      <span class="badge badge-draft">No entries</span>
+    {% endif %}
+  </div>
+  <div style="display:flex;gap:.5rem;">
+    {% if week_status != 'Submitted' %}
+    <button class="btn btn-ghost btn-sm" id="btn-save-draft">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+      Save Draft
+    </button>
+    <button class="btn btn-primary btn-sm" id="btn-submit-week">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+      Submit Week
+    </button>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Day sections -->
+{% for day in week_days %}
+<div class="day-section" data-date="{{ day.date }}">
+  <div class="day-header">
+    <span class="day-name">{{ day.label }}</span>
+    <span class="day-total {% if day.total == 0 %}{% elif day.total == 8 %}hours-ok{% elif day.total < 8 %}hours-under{% else %}hours-over{% endif %}">
+      {{ "%.2f"|format(day.total) }} hrs
+      {% if day.total > 0 %}
+        {% if day.total == 8 %} ✓{% elif day.total < 8 %} (under){% else %} ⚠ over{% endif %}
+      {% endif %}
+    </span>
+  </div>
+  <div class="day-table-wrap">
+    {% if day.entries %}
+    <table>
+      <thead>
+        <tr>
+          <th>Project</th>
+          <th>Sub-project</th>
+          <th>Category</th>
+          <th>Activity</th>
+          <th>Hours</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="tbody-{{ day.date }}">
+        {% for e in day.entries %}
+        <tr data-entry-id="{{ e.id }}">
+          <td>{{ e.project_name }}</td>
+          <td>{{ e.sub_project_name or '—' }}</td>
+          <td><span class="badge badge-{{ e.category | lower }}">{{ e.category }}</span></td>
+          <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ e.activity or '—' }}</td>
+          <td><strong>{{ "%.2f"|format(e.hours) }}</strong></td>
+          <td><span class="badge badge-{{ e.status | lower }}">{{ e.status }}</span></td>
+          <td style="white-space:nowrap;">
+            {% if week_status != 'Submitted' %}
+            <button class="action-btn edit-btn" title="Edit"
+                    data-entry='{{ e | tojson }}'
+                    onclick="openEditForm(this)">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+            <button class="action-btn del" title="Delete" onclick="deleteEntry({{ e.id }}, '{{ day.date }}')">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+            </button>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <table>
+      <tbody id="tbody-{{ day.date }}"></tbody>
+    </table>
+    {% endif %}
+
+    {% if week_status != 'Submitted' %}
+    <!-- Add row button -->
+    <button class="add-row-btn" onclick="openAddForm('{{ day.date }}')">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      Add entry
+    </button>
+
+    <!-- Copy yesterday button (only show on Mon if no entries) -->
+    {% if loop.index == 1 and not day.entries %}
+    <button class="add-row-btn" onclick="copyYesterday('{{ day.date }}')" style="color:var(--muted);">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      Copy yesterday
+    </button>
+    {% elif not loop.first and not day.entries %}
+    <button class="add-row-btn" onclick="copyYesterday('{{ day.date }}')" style="color:var(--muted);">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      Copy yesterday
+    </button>
+    {% endif %}
+
+    <!-- Inline add/edit form -->
+    <div class="inline-form" id="form-{{ day.date }}">
+      <div class="inline-form-grid">
+        <div class="form-group">
+          <label class="form-label">Project *</label>
+          <select class="form-control form-proj" onchange="loadSubs(this)">
+            <option value="">— Select —</option>
+            {% for p in projects %}
+            <option value="{{ p.id }}">{{ p.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Sub-project</label>
+          <select class="form-control form-sub">
+            <option value="">— None —</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Category *</label>
+          <select class="form-control form-cat" onchange="handleCatChange(this)">
+            <option value="Billable">Billable</option>
+            <option value="Internal">Internal</option>
+            <option value="Personal">Personal</option>
+            <option value="Leave">Leave</option>
+          </select>
+        </div>
+        <div class="form-group fg-activity">
+          <label class="form-label">Activity</label>
+          <input type="text" class="form-control form-activity" placeholder="What did you work on?">
+        </div>
+        <div class="form-group fg-hours">
+          <label class="form-label">Hours *</label>
+          <input type="number" class="form-control form-hours" min="0.25" max="12" step="0.25" value="8">
+        </div>
+        <div style="display:flex;gap:.4rem;align-items:flex-end;padding-bottom:1px;">
+          <button class="btn btn-primary btn-sm form-save-btn" onclick="saveEntry(this, '{{ day.date }}')">Save</button>
+          <button class="btn btn-ghost btn-sm" onclick="closeForm('{{ day.date }}')">Cancel</button>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+{% endfor %}
+
+<!-- Edit modal (shared) -->
+<div class="modal-overlay hidden" id="modal-edit">
+  <div class="modal" style="max-width:540px;">
+    <div class="modal-header">
+      <h2 class="modal-title">Edit Entry</h2>
+      <button class="modal-close" onclick="closeEditModal()">✕</button>
+    </div>
+    <input type="hidden" id="edit-entry-id">
+    <input type="hidden" id="edit-entry-date">
+    <div class="form-grid" style="gap:.85rem;">
+      <div class="form-group">
+        <label class="form-label">Project *</label>
+        <select class="form-control" id="edit-proj" onchange="loadEditSubs()">
+          <option value="">— Select —</option>
+          {% for p in projects %}
+          <option value="{{ p.id }}">{{ p.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Sub-project</label>
+        <select class="form-control" id="edit-sub">
+          <option value="">— None —</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Category *</label>
+        <select class="form-control" id="edit-cat" onchange="handleEditCatChange()">
+          <option value="Billable">Billable</option>
+          <option value="Internal">Internal</option>
+          <option value="Personal">Personal</option>
+          <option value="Leave">Leave</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Hours *</label>
+        <input type="number" class="form-control" id="edit-hours" min="0.25" max="12" step="0.25">
+      </div>
+      <div class="form-group form-grid-full">
+        <label class="form-label">Activity</label>
+        <input type="text" class="form-control" id="edit-activity" placeholder="What did you work on?">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeEditModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEditEntry()">Save Changes</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const SUBS_BY_PROJECT = {{ subs_json | safe }};
+const TODAY = "{{ today }}";
+const MONDAY = "{{ monday }}";
+
+// ── Sub-project loading ───────────────────────────────────────────────────────
+function loadSubs(projSelect) {
+  var form = projSelect.closest('.inline-form');
+  var subSel = form.querySelector('.form-sub');
+  var projId = parseInt(projSelect.value);
+  subSel.innerHTML = '<option value="">— None —</option>';
+  var subs = SUBS_BY_PROJECT[projId] || [];
+  subs.forEach(function(s) {
+    var opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = s.name;
+    subSel.appendChild(opt);
+  });
+}
+
+function loadEditSubs() {
+  var projId = parseInt(document.getElementById('edit-proj').value);
+  var subSel = document.getElementById('edit-sub');
+  var curVal = subSel.value;
+  subSel.innerHTML = '<option value="">— None —</option>';
+  var subs = SUBS_BY_PROJECT[projId] || [];
+  subs.forEach(function(s) {
+    var opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = s.name;
+    subSel.appendChild(opt);
+  });
+  subSel.value = curVal;
+}
+
+// ── Leave category auto-fill ─────────────────────────────────────────────────
+function handleCatChange(catSel) {
+  var form = catSel.closest('.inline-form');
+  var hoursInput = form.querySelector('.form-hours');
+  if (catSel.value === 'Leave') {
+    if (!hoursInput._userEdited) {
+      hoursInput.value = 8;
+      hoursInput._leaveDefault = true;
+    }
+    // Show leave options
+    showLeaveOptions(catSel);
+  }
+}
+
+function showLeaveOptions(catSel) {
+  var form = catSel.closest('.inline-form');
+  var hoursInput = form.querySelector('.form-hours');
+  // Simple: set 8 hrs by default; user can change to 4
+  if (!form.querySelector('.leave-hint')) {
+    var hint = document.createElement('div');
+    hint.className = 'leave-hint';
+    hint.style.cssText = 'font-size:11px;color:var(--muted);margin-top:.2rem;';
+    hint.innerHTML = '<button type="button" onclick="setLeaveHours(this, 8)" style="margin-right:.5rem;font-size:11px;padding:.1rem .4rem;" class="btn btn-ghost btn-sm">Full day (8h)</button><button type="button" onclick="setLeaveHours(this, 4)" style="font-size:11px;padding:.1rem .4rem;" class="btn btn-ghost btn-sm">Half day (4h)</button>';
+    var hoursGroup = hoursInput.closest('.form-group');
+    hoursGroup.appendChild(hint);
+  }
+}
+
+function setLeaveHours(btn, h) {
+  var form = btn.closest('.inline-form');
+  form.querySelector('.form-hours').value = h;
+}
+
+function handleEditCatChange() {
+  var cat = document.getElementById('edit-cat').value;
+  if (cat === 'Leave') {
+    document.getElementById('edit-hours').value = 8;
+  }
+}
+
+// ── Open / close inline forms ─────────────────────────────────────────────────
+function openAddForm(dateStr) {
+  // Close any other open form first
+  document.querySelectorAll('.inline-form.visible').forEach(function(f) {
+    f.classList.remove('visible');
+  });
+  var form = document.getElementById('form-' + dateStr);
+  if (form) {
+    form.classList.add('visible');
+    form.dataset.mode = 'add';
+    form.dataset.entryId = '';
+    // Reset fields
+    form.querySelector('.form-proj').value = '';
+    form.querySelector('.form-sub').innerHTML = '<option value="">— None —</option>';
+    form.querySelector('.form-cat').value = 'Billable';
+    form.querySelector('.form-activity').value = '';
+    form.querySelector('.form-hours').value = 8;
+    var hint = form.querySelector('.leave-hint');
+    if (hint) hint.remove();
+    form.scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
+}
+
+function closeForm(dateStr) {
+  var form = document.getElementById('form-' + dateStr);
+  if (form) form.classList.remove('visible');
+}
+
+// ── Save entry (add or edit inline) ──────────────────────────────────────────
+function saveEntry(btn, dateStr) {
+  var form = document.getElementById('form-' + dateStr);
+  var projId = parseInt(form.querySelector('.form-proj').value);
+  var subId  = parseInt(form.querySelector('.form-sub').value) || null;
+  var cat    = form.querySelector('.form-cat').value;
+  var act    = form.querySelector('.form-activity').value.trim();
+  var hours  = parseFloat(form.querySelector('.form-hours').value);
+
+  if (!projId) { toast('Please select a project.', true); return; }
+  if (!hours || isNaN(hours)) { toast('Please enter hours.', true); return; }
+
+  var mode    = form.dataset.mode || 'add';
+  var entryId = form.dataset.entryId;
+
+  var payload = {
+    entry_date: dateStr,
+    project_id: projId,
+    sub_project_id: subId,
+    category: cat,
+    activity: act,
+    hours: hours,
+  };
+
+  var url = mode === 'edit' ? '/api/entries/' + entryId : '/api/entries';
+  var method = mode === 'edit' ? 'PUT' : 'POST';
+
+  btn.disabled = true;
+  fetch(url, {
+    method: method,
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.error) { toast(data.error, true); btn.disabled = false; return; }
+    closeForm(dateStr);
+    location.reload();
+  })
+  .catch(function(e) { toast('Network error', true); btn.disabled = false; });
+}
+
+// ── Edit modal ────────────────────────────────────────────────────────────────
+function openEditForm(btn) {
+  var entry = JSON.parse(btn.dataset.entry);
+  document.getElementById('edit-entry-id').value   = entry.id;
+  document.getElementById('edit-entry-date').value = entry.entry_date;
+  document.getElementById('edit-proj').value     = entry.project_id;
+  loadEditSubs();
+  setTimeout(function() {
+    document.getElementById('edit-sub').value  = entry.sub_project_id || '';
+  }, 0);
+  document.getElementById('edit-cat').value      = entry.category;
+  document.getElementById('edit-activity').value = entry.activity || '';
+  document.getElementById('edit-hours').value    = entry.hours;
+  document.getElementById('modal-edit').classList.remove('hidden');
+}
+
+function closeEditModal() {
+  document.getElementById('modal-edit').classList.add('hidden');
+}
+
+function saveEditEntry() {
+  var id   = document.getElementById('edit-entry-id').value;
+  var date = document.getElementById('edit-entry-date').value;
+  var payload = {
+    entry_date:     date,
+    project_id:     parseInt(document.getElementById('edit-proj').value),
+    sub_project_id: parseInt(document.getElementById('edit-sub').value) || null,
+    category:       document.getElementById('edit-cat').value,
+    activity:       document.getElementById('edit-activity').value.trim(),
+    hours:          parseFloat(document.getElementById('edit-hours').value),
+  };
+  if (!payload.project_id) { toast('Please select a project.', true); return; }
+
+  fetch('/api/entries/' + id, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.error) { toast(data.error, true); return; }
+    closeEditModal();
+    location.reload();
+  })
+  .catch(function() { toast('Network error', true); });
+}
+
+// ── Delete entry ──────────────────────────────────────────────────────────────
+function deleteEntry(id, dateStr) {
+  if (!confirm('Delete this entry?')) return;
+  fetch('/api/entries/' + id, { method: 'DELETE' })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.ok) location.reload();
+    else toast(data.error, true);
+  })
+  .catch(function() { toast('Network error', true); });
+}
+
+// ── Copy yesterday ────────────────────────────────────────────────────────────
+function copyYesterday(dateStr) {
+  fetch('/api/entries/yesterday?ref_date=' + dateStr)
+  .then(function(r) { return r.json(); })
+  .then(function(entries) {
+    if (!entries.length) { toast('No entries found for previous day.'); return; }
+    var promises = entries.map(function(e) {
+      return fetch('/api/entries', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          entry_date: dateStr,
+          project_id: e.project_id,
+          sub_project_id: e.sub_project_id,
+          category: e.category,
+          activity: e.activity,
+          hours: e.hours,
+        }),
+      }).then(function(r) { return r.json(); });
+    });
+    return Promise.all(promises);
+  })
+  .then(function(results) {
+    if (results) {
+      var err = results.find(function(r) { return r && r.error; });
+      if (err) toast(err.error, true);
+      else location.reload();
+    }
+  })
+  .catch(function() { toast('Network error', true); });
+}
+
+// ── Submit week ───────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+  var submitBtn = document.getElementById('btn-submit-week');
+  var draftBtn  = document.getElementById('btn-save-draft');
+
+  if (submitBtn) {
+    submitBtn.addEventListener('click', function() {
+      if (!confirm('Submit this week? Submitted entries cannot be edited.')) return;
+      fetch('/api/entries/submit-week', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({monday: MONDAY}),
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.ok) location.reload();
+        else toast(d.error || 'Error', true);
+      })
+      .catch(function() { toast('Network error', true); });
+    });
+  }
+
+  if (draftBtn) {
+    draftBtn.addEventListener('click', function() {
+      toast('Entries auto-saved as draft.');
+    });
+  }
+});
+</script>
+{% endblock %}

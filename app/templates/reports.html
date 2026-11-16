@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% block title %}Reports – ClockWork PM{% endblock %}
+
+{% block head %}
+<style>
+  .totals-row td { font-weight:700; background:var(--gray-15); border-top:2px solid var(--border); }
+  .preset-btns { display:flex; gap:.4rem; flex-wrap:wrap; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Reports</h1>
+  <button class="btn btn-primary" id="btn-export">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    Export Excel
+  </button>
+</div>
+
+<!-- Filter bar -->
+<div class="toolbar">
+  <div class="form-group" style="flex:0 0 auto;">
+    <label class="form-label">From</label>
+    <input type="date" class="form-control" id="filter-from" value="{{ default_from }}">
+  </div>
+  <div class="form-group" style="flex:0 0 auto;">
+    <label class="form-label">To</label>
+    <input type="date" class="form-control" id="filter-to" value="{{ default_to }}">
+  </div>
+  {% if users | length > 1 %}
+  <div class="form-group" style="flex:0 0 140px;">
+    <label class="form-label">Person</label>
+    <select class="form-control" id="filter-user">
+      <option value="">All</option>
+      {% for u in users %}
+      <option value="{{ u.id }}">{{ u.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% endif %}
+  <div class="form-group" style="flex:0 0 150px;">
+    <label class="form-label">Project</label>
+    <select class="form-control" id="filter-project">
+      <option value="">All</option>
+      {% for p in projects %}
+      <option value="{{ p.id }}">{{ p.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="form-group" style="flex:0 0 130px;">
+    <label class="form-label">Category</label>
+    <select class="form-control" id="filter-cat">
+      <option value="">All</option>
+      <option value="Billable">Billable</option>
+      <option value="Internal">Internal</option>
+      <option value="Personal">Personal</option>
+      <option value="Leave">Leave</option>
+    </select>
+  </div>
+  <div style="display:flex;gap:.4rem;align-items:flex-end;">
+    <button class="btn btn-primary btn-sm" onclick="runReport()">Run</button>
+  </div>
+</div>
+
+<!-- Presets -->
+<div style="margin-bottom:1rem;" class="preset-btns">
+  <span style="font-size:12px;color:var(--muted);align-self:center;">Presets:</span>
+  <button class="btn btn-ghost btn-sm" onclick="preset('this-month')">This Month</button>
+  <button class="btn btn-ghost btn-sm" onclick="preset('last-month')">Last Month</button>
+  <button class="btn btn-ghost btn-sm" onclick="preset('this-week')">This Week</button>
+  <button class="btn btn-ghost btn-sm" onclick="preset('last-week')">Last Week</button>
+</div>
+
+<!-- Summary -->
+<div id="report-summary" style="display:none; margin-bottom:.75rem;">
+  <span id="report-count" style="font-size:13px;color:var(--muted);"></span>
+  <strong id="report-total" style="font-size:13px;color:var(--text);margin-left:.75rem;"></strong>
+</div>
+
+<!-- Results -->
+<div class="table-wrap">
+  <table id="report-table">
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Person</th>
+        <th>Project</th>
+        <th>Sub-project</th>
+        <th>Category</th>
+        <th>Activity</th>
+        <th>Hours</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody id="report-tbody">
+      <tr><td colspan="8" class="empty-state" style="text-align:center;padding:2rem;color:var(--muted);">
+        Select filters and click Run to load the report.
+      </td></tr>
+    </tbody>
+    <tfoot id="report-tfoot"></tfoot>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function buildParams() {
+  var params = new URLSearchParams();
+  var from = document.getElementById('filter-from').value;
+  var to   = document.getElementById('filter-to').value;
+  if (from) params.set('date_from', from);
+  if (to)   params.set('date_to',   to);
+  var uid = document.getElementById('filter-user');
+  if (uid && uid.value) params.set('user_id', uid.value);
+  var proj = document.getElementById('filter-project');
+  if (proj && proj.value) params.set('project_id', proj.value);
+  var cat = document.getElementById('filter-cat');
+  if (cat && cat.value) params.set('category', cat.value);
+  return params;
+}
+
+function runReport() {
+  var params = buildParams();
+  fetch('/api/reports/data?' + params.toString())
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.error) { toast(d.error, true); return; }
+    renderTable(d.rows, d.total_hours);
+  })
+  .catch(function() { toast('Failed to load report', true); });
+}
+
+function renderTable(rows, totalHours) {
+  var tbody = document.getElementById('report-tbody');
+  var tfoot = document.getElementById('report-tfoot');
+  tbody.innerHTML = '';
+  tfoot.innerHTML = '';
+
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--muted);">No entries found for selected filters.</td></tr>';
+    document.getElementById('report-summary').style.display = 'none';
+    return;
+  }
+
+  var catColors = {Billable:'badge-billable', Internal:'badge-internal', Personal:'badge-personal', Leave:'badge-leave'};
+
+  rows.forEach(function(r) {
+    var tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td>' + escHtml(r.entry_date) + '</td>' +
+      '<td>' + escHtml(r.user_name) + '</td>' +
+      '<td>' + escHtml(r.project_name) + '</td>' +
+      '<td>' + escHtml(r.sub_project_name || '—') + '</td>' +
+      '<td><span class="badge ' + (catColors[r.category] || '') + '">' + escHtml(r.category) + '</span></td>' +
+      '<td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(r.activity || '—') + '</td>' +
+      '<td><strong>' + r.hours.toFixed(2) + '</strong></td>' +
+      '<td><span class="badge badge-' + r.status.toLowerCase() + '">' + r.status + '</span></td>';
+    tbody.appendChild(tr);
+  });
+
+  // Totals row
+  var tfr = document.createElement('tr');
+  tfr.className = 'totals-row';
+  tfr.innerHTML =
+    '<td colspan="6" style="font-weight:700;">Total</td>' +
+    '<td><strong>' + totalHours.toFixed(2) + 'h</strong></td>' +
+    '<td></td>';
+  tfoot.appendChild(tfr);
+
+  // Summary
+  var sumEl = document.getElementById('report-summary');
+  sumEl.style.display = '';
+  document.getElementById('report-count').textContent = rows.length + ' entries';
+  document.getElementById('report-total').textContent = 'Total: ' + totalHours.toFixed(2) + ' hrs';
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Export
+document.getElementById('btn-export').addEventListener('click', function() {
+  var params = buildParams();
+  window.location = '/api/reports/export?' + params.toString();
+});
+
+// Presets
+function preset(key) {
+  var today = new Date();
+  var from, to;
+  if (key === 'this-month') {
+    from = new Date(today.getFullYear(), today.getMonth(), 1);
+    to   = today;
+  } else if (key === 'last-month') {
+    from = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    to   = new Date(today.getFullYear(), today.getMonth(), 0);
+  } else if (key === 'this-week') {
+    var day = today.getDay() || 7;
+    from = new Date(today); from.setDate(today.getDate() - day + 1);
+    to   = today;
+  } else if (key === 'last-week') {
+    var day = today.getDay() || 7;
+    from = new Date(today); from.setDate(today.getDate() - day - 6);
+    to   = new Date(today); to.setDate(today.getDate() - day);
+  }
+  function fmt(d) { return d.toISOString().split('T')[0]; }
+  document.getElementById('filter-from').value = fmt(from);
+  document.getElementById('filter-to').value   = fmt(to);
+  runReport();
+}
+
+// Auto-run on load
+window.addEventListener('load', runReport);
+</script>
+{% endblock %}

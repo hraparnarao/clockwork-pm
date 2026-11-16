@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <link rel="icon" type="image/x-icon" href="/static/img/favicon.ico">
+  <title>{% block title %}ClockWork PM{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/clockwork.css">
+  {% block head %}{% endblock %}
+</head>
+<body>
+  {% include '_sidebar.html' %}
+
+  <div class="content-area">
+    <div class="page-wrap">
+      {% block content %}{% endblock %}
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <script>
+  function toast(msg, isErr) {
+    var el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = 'show' + (isErr ? ' error' : '');
+    clearTimeout(el._t);
+    el._t = setTimeout(function() { el.className = ''; }, 3200);
+  }
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

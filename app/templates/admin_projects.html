@@ -1,0 +1,234 @@
+{% extends "base.html" %}
+{% block title %}Projects – ClockWork PM{% endblock %}
+
+{% block head %}
+<style>
+  .project-row { cursor:pointer; }
+  .sub-list { display:flex; flex-wrap:wrap; gap:.35rem; }
+  .sub-tag {
+    display:inline-flex; align-items:center; gap:.3rem;
+    padding:.2rem .55rem; background:var(--gray-15);
+    border:1px solid var(--border); border-radius:999px;
+    font-size:11px; font-weight:500; color:var(--gray-70);
+  }
+  .sub-tag .del-sub { cursor:pointer; color:var(--muted); background:none; border:none; padding:0; line-height:1; }
+  .sub-tag .del-sub:hover { color:var(--color-red); }
+  .sub-tag--inactive { opacity:.55; background:var(--status-stale-bg); border-color:var(--gray-30); font-style:italic; }
+  .add-sub-inline { display:flex; gap:.4rem; align-items:center; margin-top:.4rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Projects</h1>
+  <button class="btn btn-primary" onclick="openProjectModal()">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    New Project
+  </button>
+</div>
+
+<div class="table-wrap">
+  <table id="projects-table">
+    <thead>
+      <tr>
+        <th>Project</th>
+        <th>Client</th>
+        <th>Sub-projects</th>
+        <th>Status</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="projects-tbody">
+      {% for p in projects %}
+      <tr data-pid="{{ p.id }}">
+        <td><strong>{{ p.name }}</strong></td>
+        <td>{{ p.client or '—' }}</td>
+        <td>
+          <div class="sub-list" id="subs-{{ p.id }}">
+            {% for s in subs_by_project.get(p.id, []) %}
+            <span class="sub-tag{% if not s.is_active %} sub-tag--inactive{% endif %}" data-sid="{{ s.id }}" data-name="{{ s.name }}">
+              {{ s.name }}{% if not s.is_active %} <em style="font-size:10px;opacity:.7;">(inactive)</em>{% endif %}
+              {% if s.is_active %}
+              <button class="del-sub" onclick="deleteSub({{ s.id }}, {{ p.id }}, '{{ s.name | replace("'", "\\'") }}')" title="Remove sub-project">✕</button>
+              {% endif %}
+            </span>
+            {% endfor %}
+          </div>
+          <div class="add-sub-inline" id="addsub-{{ p.id }}" style="display:none;">
+            <input type="text" class="form-control" style="max-width:160px;padding:.3rem .6rem;font-size:12px;" placeholder="Sub-project name" id="newsub-{{ p.id }}">
+            <button class="btn btn-primary btn-sm" onclick="addSub({{ p.id }})">Add</button>
+            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('addsub-{{ p.id }}').style.display='none'">×</button>
+          </div>
+          <button class="btn btn-ghost btn-sm" style="margin-top:.35rem;" onclick="document.getElementById('addsub-{{ p.id }}').style.display='flex'">+ Sub</button>
+        </td>
+        <td>
+          {% if p.is_active %}
+          <span class="badge badge-submitted">Active</span>
+          {% else %}
+          <span class="badge badge-draft">Inactive</span>
+          {% endif %}
+        </td>
+        <td>
+          <button class="action-btn edit-btn" onclick="openEditProject({{ p | tojson }})" title="Edit">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Project modal -->
+<div class="modal-overlay hidden" id="modal-project">
+  <div class="modal" style="max-width:460px;">
+    <div class="modal-header">
+      <h2 class="modal-title" id="proj-modal-title">New Project</h2>
+      <button class="modal-close" onclick="closeProjectModal()">✕</button>
+    </div>
+    <input type="hidden" id="proj-id">
+    <div class="form-grid" style="gap:.75rem;">
+      <div class="form-group form-grid-full">
+        <label class="form-label">Project Name *</label>
+        <input type="text" class="form-control" id="proj-name">
+      </div>
+      <div class="form-group form-grid-full">
+        <label class="form-label">Client</label>
+        <input type="text" class="form-control" id="proj-client">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Status</label>
+        <select class="form-control" id="proj-active">
+          <option value="1">Active</option>
+          <option value="0">Inactive</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeProjectModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveProject()">Save</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Sub-projects ──────────────────────────────────────────────────────────────
+function addSub(pid) {
+  var input = document.getElementById('newsub-' + pid);
+  var name = input.value.trim();
+  if (!name) return;
+  fetch('/admin/api/projects/' + pid + '/subs', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name: name}),
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.error) { toast(d.error, true); return; }
+    var list = document.getElementById('subs-' + pid);
+    var tag = document.createElement('span');
+    tag.className = 'sub-tag';
+    tag.dataset.sid  = d.id;
+    tag.dataset.name = d.name;
+    var escapedName = d.name.replace(/'/g, "\\'");
+    tag.innerHTML = d.name + ' <button class="del-sub" onclick="deleteSub(' + d.id + ',' + pid + ',\'' + escapedName + '\')" title="Remove sub-project">✕</button>';
+    list.appendChild(tag);
+    input.value = '';
+    document.getElementById('addsub-' + pid).style.display = 'none';
+    toast('Sub-project added.');
+  })
+  .catch(function() { toast('Network error', true); });
+}
+
+function deleteSub(sid, pid, name) {
+  var label = name || 'this sub-project';
+  if (!confirm('Remove sub-project "' + label + '"?')) return;
+
+  fetch('/admin/api/subs/' + sid, { method: 'DELETE' })
+  .then(function(r) {
+    // Always parse JSON; on non-2xx FastAPI may return HTML — guard against that
+    var ct = r.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+      throw new Error('Server error (HTTP ' + r.status + ')');
+    }
+    return r.json();
+  })
+  .then(function(d) {
+    if (!d.ok) { toast(d.error || 'Failed to remove sub-project.', true); return; }
+    // Remove the pill from the DOM regardless of soft/hard delete
+    var tag = document.querySelector('[data-sid="' + sid + '"]');
+    if (tag) tag.remove();
+    if (d.soft) {
+      toast(d.message);
+    } else {
+      toast('Sub-project "' + label + '" removed.');
+    }
+  })
+  .catch(function(err) { toast(err.message || 'Network error', true); });
+}
+
+// ── Project modal ─────────────────────────────────────────────────────────────
+function openProjectModal() {
+  document.getElementById('proj-modal-title').textContent = 'New Project';
+  document.getElementById('proj-id').value    = '';
+  document.getElementById('proj-name').value  = '';
+  document.getElementById('proj-client').value = '';
+  document.getElementById('proj-active').value = '1';
+  document.getElementById('modal-project').classList.remove('hidden');
+}
+
+function openEditProject(p) {
+  document.getElementById('proj-modal-title').textContent = 'Edit Project';
+  document.getElementById('proj-id').value     = p.id;
+  document.getElementById('proj-name').value   = p.name;
+  document.getElementById('proj-client').value = p.client || '';
+  document.getElementById('proj-active').value = p.is_active ? '1' : '0';
+  document.getElementById('modal-project').classList.remove('hidden');
+}
+
+function closeProjectModal() {
+  document.getElementById('modal-project').classList.add('hidden');
+}
+
+function saveProject() {
+  var id     = document.getElementById('proj-id').value;
+  var name   = document.getElementById('proj-name').value.trim();
+  var client = document.getElementById('proj-client').value.trim();
+  var active = document.getElementById('proj-active').value === '1';
+
+  if (!name) { toast('Project name is required.', true); return; }
+
+  // If deactivating an existing project, ask for confirmation
+  if (id && !active) {
+    if (!confirm('Deactivate project "' + name + '"? It will no longer appear in timesheet dropdowns, but existing entries will be preserved.')) return;
+  }
+
+  var url    = id ? '/admin/api/projects/' + id : '/admin/api/projects';
+  var method = id ? 'PUT' : 'POST';
+
+  fetch(url, {
+    method: method,
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name: name, client: client, is_active: active}),
+  })
+  .then(function(r) {
+    var ct = r.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) throw new Error('Server error (HTTP ' + r.status + ')');
+    return r.json();
+  })
+  .then(function(d) {
+    if (d.error) { toast(d.error, true); return; }
+    closeProjectModal();
+    location.reload();
+  })
+  .catch(function(err) { toast(err.message || 'Network error', true); });
+}
+
+// action-btn style (inline)
+var style = document.createElement('style');
+style.textContent = '.action-btn{background:none;border:none;cursor:pointer;padding:.2rem .35rem;border-radius:4px;color:var(--muted);transition:color .12s,background .12s;}.action-btn:hover{background:var(--gray-15);color:var(--text);}';
+document.head.appendChild(style);
+</script>
+{% endblock %}
