@@ -12,17 +12,24 @@ def seed():
     conn = get_db()
     c = conn.cursor()
 
-    # Check if already seeded
-    if c.execute("SELECT COUNT(*) FROM users").fetchone()[0] > 0:
-        print("Already seeded, skipping.")
-        conn.close()
-        return
-
     # ── Users ──────────────────────────────────────────────────────────────────
     pw = _bcrypt.hashpw(b"password123", _bcrypt.gensalt()).decode()
-    c.execute("INSERT INTO users (name, email, password_hash, role, manager_id, is_active) VALUES (?,?,?,?,?,?)",
-              ("Aparna", "aparna@vineinfotech.com", pw, "Admin", None, 1))
-    admin_id = c.lastrowid
+
+    # Upsert admin user so password is always reset on redeploy
+    existing = c.execute("SELECT id FROM users WHERE email=?", ("aparna@vineinfotech.com",)).fetchone()
+    if existing:
+        c.execute("UPDATE users SET password_hash=? WHERE email=?", (pw, "aparna@vineinfotech.com"))
+        admin_id = existing[0]
+    else:
+        c.execute("INSERT INTO users (name, email, password_hash, role, manager_id, is_active) VALUES (?,?,?,?,?,?)",
+                  ("Aparna", "aparna@vineinfotech.com", pw, "Admin", None, 1))
+        admin_id = c.lastrowid
+
+    if c.execute("SELECT COUNT(*) FROM users WHERE email != 'aparna@vineinfotech.com'").fetchone()[0] > 0:
+        print("Demo users already seeded, skipping.")
+        conn.commit()
+        conn.close()
+        return
 
     c.execute("INSERT INTO users (name, email, password_hash, role, manager_id, is_active) VALUES (?,?,?,?,?,?)",
               ("Mark Manager", "mark@vine.com", pw, "Manager", admin_id, 1))
