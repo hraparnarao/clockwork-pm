@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, JSONResponse
 from app.database import init_db, get_db
 from app.routers import auth, timesheet, dashboard, reports, admin
+from seed import seed
 import bcrypt as _bcrypt
 
 app = FastAPI(title="ClockWork PM")
@@ -24,6 +25,7 @@ app.include_router(admin.router)
 @app.on_event("startup")
 def startup():
     init_db()
+    seed()
 
 
 @app.get("/")
