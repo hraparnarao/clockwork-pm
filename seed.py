@@ -21,7 +21,7 @@ def seed():
     # ── Users ──────────────────────────────────────────────────────────────────
     pw = _bcrypt.hashpw(b"password123", _bcrypt.gensalt()).decode()
     c.execute("INSERT INTO users (name, email, password_hash, role, manager_id, is_active) VALUES (?,?,?,?,?,?)",
-              ("Alice Admin", "alice@vine.com", pw, "Admin", None, 1))
+              ("Aparna", "aparna@vineinfotech.com", pw, "Admin", None, 1))
     admin_id = c.lastrowid
 
     c.execute("INSERT INTO users (name, email, password_hash, role, manager_id, is_active) VALUES (?,?,?,?,?,?)",
@@ -97,7 +97,7 @@ def seed():
     conn.commit()
     conn.close()
     print("Seeded: 3 users, 4 projects, 4 sub-projects, ~2 weeks of entries.")
-    print("Login: alice@vine.com | mark@vine.com | emma@vine.com  (password: password123)")
+    print("Login: aparna@vineinfotech.com | mark@vine.com | emma@vine.com  (password: password123)")
 
 
 if __name__ == "__main__":
